@@ -101,6 +101,12 @@ const state = {
   cleanPrefs: { cpu: true, gpu: true, ram: true, internet: true, storage: true },
   cleanPreview: null,
   cleanBusy: false,
+  page: 'processes',
+  settingsTab: 'processes',
+  history: [],
+  graphWindow: 60,
+  graphFill: true,
+  graphGrid: true,
 };
 
 const byPid = () => new Map((state.snap?.processes || []).map((p) => [p.pid, p]));
@@ -339,27 +345,17 @@ function updateHeaderStats() {
   }
 
   const machine = $('#machine');
-  machine.innerHTML = [
+  if (machine) machine.innerHTML = machineEntries(snap).map(([k, v]) => `<dt>${esc(k)}</dt><dd title="${esc(v)}">${esc(v)}</dd>`).join('');
+}
+
+function machineEntries(snap) {
+  return [
     ['Host', snap.host || '–'],
     ['User', snap.user || '–'],
     ['Cores', String(snap.os?.cores ?? '–')],
     ['Build', snap.os?.build || '–'],
     ['Session', snap.elevated ? 'Elevated' : 'Standard'],
-  ].map(([k, v]) => `<dt>${esc(k)}</dt><dd title="${esc(v)}">${esc(v)}</dd>`).join('');
-}
-
-function renderViews() {
-  const snap = state.snap;
-  const host = $('#views');
-  host.innerHTML = '';
-  if (!snap) return;
-  for (const view of VIEWS) {
-    const count = snap.processes.filter(view.test).length;
-    const button = el('button', `rail-item${state.view === view.id ? ' active' : ''}`);
-    button.dataset.view = view.id;
-    button.innerHTML = `<span>${esc(view.label)}</span><span class="count">${count}</span>`;
-    host.appendChild(button);
-  }
+  ];
 }
 
 function renderSortChips() {
@@ -930,6 +926,150 @@ function exportReport() {
   }).catch((error) => toast('err', 'Could not export', error.message));
 }
 
+// ------------------------------------------------------------------- pages --
+
+function setPage(page) {
+  state.page = page === 'graphs' ? 'graphs' : 'processes';
+  document.querySelectorAll('.nav-item[data-page]').forEach((button) => {
+    const on = button.dataset.page === state.page;
+    button.classList.toggle('active', on);
+    button.setAttribute('aria-current', on ? 'page' : 'false');
+  });
+  $('#page-processes').classList.toggle('hidden', state.page !== 'processes');
+  $('#page-graphs').classList.toggle('hidden', state.page !== 'graphs');
+  render();
+}
+
+// ------------------------------------------------------------------ graphs --
+
+const GRAPH_PREFS_KEY = 'tm2.graphs';
+
+function saveGraphPrefs() {
+  try {
+    localStorage.setItem(GRAPH_PREFS_KEY, JSON.stringify({
+      window: state.graphWindow,
+      fill: state.graphFill,
+      grid: state.graphGrid,
+    }));
+  } catch { /* storage unavailable */ }
+}
+
+function hydrateGraphPrefs() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(GRAPH_PREFS_KEY) || 'null');
+    if (!saved) return;
+    if ([30, 60, 300, 600].includes(Number(saved.window))) state.graphWindow = Number(saved.window);
+    if (typeof saved.fill === 'boolean') state.graphFill = saved.fill;
+    if (typeof saved.grid === 'boolean') state.graphGrid = saved.grid;
+  } catch { /* storage unavailable: keep defaults */ }
+}
+
+function pushHistory(snap) {
+  state.history.push({
+    t: Date.now(),
+    cpu: Number(snap.load?.cpu) || 0,
+    ram: Number(snap.memory?.percent) || 0,
+    disk: Number(snap.load?.disk) || 0,
+    procs: Number(snap.counts?.processes) || 0,
+  });
+  const keepSeconds = Math.max(state.graphWindow, 60);
+  const cutoff = Date.now() - keepSeconds * 1000;
+  while (state.history.length && state.history[0].t < cutoff) state.history.shift();
+  if (state.history.length > 4000) state.history.splice(0, state.history.length - 4000);
+}
+
+function renderGraphs() {
+  const snap = state.snap;
+  if (!snap) return;
+  const samples = state.history.length;
+  const span = samples > 1 ? Math.round((state.history[samples - 1].t - state.history[0].t) / 1000) : 0;
+
+  $('#graphs-sub').textContent = samples < 2
+    ? 'Collecting samples — the lines appear after the second refresh.'
+    : `${samples} samples over ${span}s · showing the last ${state.graphWindow}s · one sample every ${Math.round(state.pollMs / 1000)}s`;
+
+  const cpu = snap.load?.cpu;
+  const ram = snap.memory?.percent;
+  const disk = snap.load?.disk;
+  $('#g-cpu-now').textContent = fmtPct(cpu);
+  $('#g-ram-now').textContent = fmtPct(ram);
+  $('#g-disk-now').textContent = disk == null ? '–' : fmtPct(disk);
+  $('#g-both-now').textContent = `${fmtPct(cpu)} / ${fmtPct(ram)}`;
+  $('#g-cpu-foot').textContent = `${snap.os?.cores ?? '?'} logical cores`;
+  $('#g-ram-foot').textContent = `${fmtBytes(snap.memory?.used)} of ${fmtBytes(snap.memory?.total)}`;
+  $('#g-disk-foot').textContent = 'busy time, sampled by TM2';
+
+  drawChart($('#chart-cpu'), [{ key: 'cpu', color: '#38bdf8' }]);
+  drawChart($('#chart-ram'), [{ key: 'ram', color: '#4ade80' }]);
+  drawChart($('#chart-disk'), [{ key: 'disk', color: '#fbbf24' }]);
+  drawChart($('#chart-both'), [{ key: 'cpu', color: '#38bdf8' }, { key: 'ram', color: '#4ade80' }]);
+}
+
+function drawChart(canvas, series) {
+  if (!canvas) return;
+  const dpr = window.devicePixelRatio || 1;
+  const cssWidth = canvas.clientWidth || canvas.parentElement?.clientWidth || 320;
+  const cssHeight = canvas.clientHeight || 108;
+  if (canvas.width !== Math.round(cssWidth * dpr) || canvas.height !== Math.round(cssHeight * dpr)) {
+    canvas.width = Math.round(cssWidth * dpr);
+    canvas.height = Math.round(cssHeight * dpr);
+  }
+  const ctx = canvas.getContext('2d');
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, cssWidth, cssHeight);
+
+  if (state.graphGrid) {
+    ctx.strokeStyle = 'rgba(120, 150, 175, 0.16)';
+    ctx.lineWidth = 1;
+    for (let i = 0; i <= 4; i += 1) {
+      const y = 4 + ((cssHeight - 8) * i) / 4;
+      ctx.beginPath();
+      ctx.moveTo(0, y);
+      ctx.lineTo(cssWidth, y);
+      ctx.stroke();
+    }
+  }
+
+  const now = Date.now();
+  const start = now - state.graphWindow * 1000;
+  const points = state.history.filter((h) => h.t >= start);
+
+  if (points.length < 2) {
+    ctx.fillStyle = 'rgba(150, 170, 190, 0.55)';
+    ctx.font = '11px ui-monospace, monospace';
+    ctx.fillText('waiting for samples', 6, cssHeight / 2);
+    return;
+  }
+
+  const xOf = (t) => ((t - start) / (state.graphWindow * 1000)) * cssWidth;
+  const yOf = (v) => cssHeight - 4 - (Math.max(0, Math.min(100, v)) / 100) * (cssHeight - 8);
+
+  for (const s of series) {
+    ctx.beginPath();
+    points.forEach((point, index) => {
+      const x = xOf(point.t);
+      const y = yOf(point[s.key]);
+      if (index === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    });
+    ctx.strokeStyle = s.color;
+    ctx.lineWidth = 1.8;
+    ctx.lineJoin = 'round';
+    ctx.lineCap = 'round';
+    ctx.stroke();
+
+    if (state.graphFill) {
+      const gradient = ctx.createLinearGradient(0, 0, 0, cssHeight);
+      gradient.addColorStop(0, `${s.color}44`);
+      gradient.addColorStop(1, `${s.color}00`);
+      ctx.lineTo(xOf(points[points.length - 1].t), cssHeight);
+      ctx.lineTo(xOf(points[0].t), cssHeight);
+      ctx.closePath();
+      ctx.fillStyle = gradient;
+      ctx.fill();
+    }
+  }
+}
+
 // ----------------------------------------------------------------- settings --
 
 function paintIntervalLabel() {
@@ -953,38 +1093,149 @@ function setPollInterval(ms, { reschedule = true } = {}) {
   if (reschedule) schedule();
 }
 
-function openSettings() {
-  const modal = el('div', 'modal');
+const SETTINGS_TABS = [
+  { id: 'processes', label: 'Processes' },
+  { id: 'graphs', label: 'Graphs' },
+  { id: 'about', label: 'About' },
+];
+
+function systemNote() {
+  return state.showSystem
+    ? 'System and protected processes are listed by default and labelled. TM2 never removes them from the list.'
+    : 'System processes are currently hidden by your own filter, not by Task Manager 2. The count stays visible in the status bar.';
+}
+
+function openSettings(tab = state.settingsTab) {
+  const modal = el('div', 'modal wide settings-modal');
   modal.innerHTML = `
     <div class="modal-head">
       <h2>Settings</h2>
-      <p>Changes apply immediately and are remembered on this machine.</p>
+      <p>Everything that used to sit in the sidebar lives here, split into tabs. Changes apply immediately and are remembered on this machine.</p>
     </div>
-    <div class="modal-body">
-      <div class="setting">
-        <div class="setting-head">
-          <label for="set-interval">Refresh interval</label>
-          <b id="set-interval-value">${Math.round(state.pollMs / 1000)}s</b>
-        </div>
-        <input type="range" id="set-interval" min="1" max="15" step="1" value="${Math.round(state.pollMs / 1000)}" />
-        <div class="range-ticks"><span>1s — fresher, a little more CPU</span><span>15s</span></div>
-      </div>
-      <div class="setting">
-        <div class="setting-head"><label for="set-live">Live updates</label></div>
-        <label class="check-line">
-          <input type="checkbox" id="set-live" ${state.live ? 'checked' : ''} />
-          <span>Keep reading the machine while the window is open. Turning this off freezes the list where it is.</span>
-        </label>
-      </div>
+    <div class="tabs" role="tablist">
+      ${SETTINGS_TABS.map((t) => `<button class="tab" role="tab" data-tab="${t.id}">${t.label}</button>`).join('')}
     </div>
+    <div class="modal-body" id="settings-body"></div>
     <div class="modal-foot"><button class="btn" data-close>Done</button></div>`;
 
   openModal(modal);
+  modal.querySelector('[data-close]').addEventListener('click', closeModal);
+  modal.querySelector('.tabs').addEventListener('click', (event) => {
+    const button = event.target.closest('[data-tab]');
+    if (button) selectSettingsTab(modal, button.dataset.tab);
+  });
+  selectSettingsTab(modal, tab);
+}
 
-  const slider = modal.querySelector('#set-interval');
+function selectSettingsTab(modal, tab) {
+  const known = SETTINGS_TABS.some((t) => t.id === tab) ? tab : 'processes';
+  state.settingsTab = known;
+  modal.querySelectorAll('.tab').forEach((button) => {
+    const on = button.dataset.tab === known;
+    button.classList.toggle('active', on);
+    button.setAttribute('aria-selected', String(on));
+  });
+  const body = modal.querySelector('#settings-body');
+  body.innerHTML = known === 'graphs' ? graphsSettingsHtml()
+    : known === 'about' ? aboutSettingsHtml()
+      : processesSettingsHtml();
+  if (known === 'processes') bindProcessesSettings(modal, body);
+  if (known === 'graphs') bindGraphsSettings(body);
+}
+
+function processesSettingsHtml() {
+  const snap = state.snap;
+  const views = VIEWS.map((view) => {
+    const count = snap ? snap.processes.filter(view.test).length : 0;
+    return `<button class="rail-item${state.view === view.id ? ' active' : ''}" data-set-view="${view.id}">
+      <span>${esc(view.label)}</span><span class="count">${count}</span></button>`;
+  }).join('');
+
+  const presets = [
+    ['cpu:desc', 'Busiest first'],
+    ['ws:desc', 'Biggest memory'],
+    ['start:desc', 'Newest first'],
+    ['name:asc', 'Name A→Z'],
+    ['pid:asc', 'PID'],
+  ].map(([spec, label]) => {
+    const [key, dir] = spec.split(':');
+    const on = state.sorts.length === 1 && state.sorts[0].key === key && state.sorts[0].dir === dir;
+    return `<button class="rail-item${on ? ' active' : ''}" data-set-sort="${spec}">${esc(label)}</button>`;
+  }).join('');
+
+  return `
+    <div class="setting">
+      <div class="setting-head"><label>View</label><span class="setting-hint">what the process list shows</span></div>
+      <div class="settings-list">${views}</div>
+    </div>
+    <div class="setting">
+      <div class="setting-head"><label>Sort presets</label><span class="setting-hint">or click a column header</span></div>
+      <div class="settings-list">${presets}</div>
+    </div>
+    <div class="setting">
+      <div class="setting-head"><label>Options</label></div>
+      <label class="switch">
+        <input type="checkbox" id="set-group" ${state.group ? 'checked' : ''} />
+        <span class="switch-track"><i></i></span>
+        <span>Group by app</span>
+      </label>
+      <label class="switch">
+        <input type="checkbox" id="set-system" ${state.showSystem ? 'checked' : ''} />
+        <span class="switch-track"><i></i></span>
+        <span>Show system processes</span>
+      </label>
+      <p class="setting-note" id="set-system-note">${esc(systemNote())}</p>
+    </div>
+    <div class="setting">
+      <div class="setting-head">
+        <label for="set-interval">Refresh interval</label>
+        <b id="set-interval-value">${Math.round(state.pollMs / 1000)}s</b>
+      </div>
+      <input type="range" id="set-interval" min="1" max="15" step="1" value="${Math.round(state.pollMs / 1000)}" />
+      <div class="range-ticks"><span>1s — fresher, a little more CPU</span><span>15s</span></div>
+    </div>
+    <div class="setting">
+      <div class="setting-head"><label for="set-live">Live updates</label></div>
+      <label class="check-line">
+        <input type="checkbox" id="set-live" ${state.live ? 'checked' : ''} />
+        <span>Keep reading the machine while the window is open. Turning this off freezes the list where it is.</span>
+      </label>
+    </div>`;
+}
+
+function bindProcessesSettings(modal, body) {
+  body.querySelectorAll('[data-set-view]').forEach((button) => {
+    button.addEventListener('click', () => {
+      state.view = button.dataset.setView;
+      body.querySelectorAll('[data-set-view]').forEach((b) => b.classList.toggle('active', b === button));
+      render();
+    });
+  });
+
+  body.querySelectorAll('[data-set-sort]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const [key, dir] = button.dataset.setSort.split(':');
+      state.sorts = [{ key, dir }];
+      body.querySelectorAll('[data-set-sort]').forEach((b) => b.classList.toggle('active', b === button));
+      render();
+    });
+  });
+
+  body.querySelector('#set-group').addEventListener('change', (event) => {
+    state.group = event.target.checked;
+    state.expanded.clear();
+    render();
+  });
+
+  body.querySelector('#set-system').addEventListener('change', (event) => {
+    state.showSystem = event.target.checked;
+    body.querySelector('#set-system-note').textContent = systemNote();
+    render();
+  });
+
+  const slider = body.querySelector('#set-interval');
   const pct = ((Math.round(state.pollMs / 1000) - 1) / 14) * 100;
   slider.style.setProperty('--fill', `${pct}%`);
-
   slider.addEventListener('input', () => {
     setPollInterval(Number(slider.value) * 1000, { reschedule: false });
   });
@@ -993,13 +1244,74 @@ function openSettings() {
     if (state.live) refresh(true);
   });
 
-  modal.querySelector('#set-live').addEventListener('change', (event) => {
+  body.querySelector('#set-live').addEventListener('change', (event) => {
     state.live = event.target.checked;
-    $('#opt-live').checked = state.live;
+    const live = $('#opt-live');
+    if (live) live.checked = state.live;
     if (state.live) refresh(true);
   });
+}
 
-  modal.querySelector('[data-close]').addEventListener('click', closeModal);
+function graphsSettingsHtml() {
+  const choices = [['30', '30s'], ['60', '1 min'], ['300', '5 min'], ['600', '10 min']]
+    .map(([value, label]) => `<button data-set-window="${value}" class="${state.graphWindow === Number(value) ? 'active' : ''}">${label}</button>`)
+    .join('');
+  return `
+    <div class="setting">
+      <div class="setting-head"><label>History window</label><b id="set-window-value">${state.graphWindow}s</b></div>
+      <div class="seg" id="set-window">${choices}</div>
+      <p class="setting-note">How much history the graphs keep and draw. A longer window takes longer to fill after the window opens.</p>
+    </div>
+    <div class="setting">
+      <div class="setting-head"><label>Chart style</label></div>
+      <label class="check-line"><input type="checkbox" id="set-fill" ${state.graphFill ? 'checked' : ''} /><span>Fill the area under each line</span></label>
+      <label class="check-line"><input type="checkbox" id="set-grid" ${state.graphGrid ? 'checked' : ''} /><span>Show horizontal grid lines</span></label>
+    </div>
+    <div class="setting">
+      <div class="setting-head"><label>Samples held</label><b id="set-samples">${state.history.length}</b></div>
+      <p class="setting-note">One sample is taken every time the process list refreshes. Change how often that happens on the Processes tab.</p>
+    </div>`;
+}
+
+function bindGraphsSettings(body) {
+  body.querySelectorAll('[data-set-window]').forEach((button) => {
+    button.addEventListener('click', () => {
+      state.graphWindow = Number(button.dataset.setWindow);
+      saveGraphPrefs();
+      body.querySelectorAll('[data-set-window]').forEach((b) => b.classList.toggle('active', b === button));
+      body.querySelector('#set-window-value').textContent = `${state.graphWindow}s`;
+      if (state.page === 'graphs') renderGraphs();
+    });
+  });
+  body.querySelector('#set-fill').addEventListener('change', (event) => {
+    state.graphFill = event.target.checked;
+    saveGraphPrefs();
+    if (state.page === 'graphs') renderGraphs();
+  });
+  body.querySelector('#set-grid').addEventListener('change', (event) => {
+    state.graphGrid = event.target.checked;
+    saveGraphPrefs();
+    if (state.page === 'graphs') renderGraphs();
+  });
+}
+
+function aboutSettingsHtml() {
+  const snap = state.snap;
+  const rows = snap ? machineEntries(snap) : [['Host', '–']];
+  return `
+    <div class="setting">
+      <div class="setting-head"><label>This machine</label></div>
+      <dl class="kv settings-kv">${rows.map(([k, v]) => `<dt>${esc(k)}</dt><dd title="${esc(v)}">${esc(v)}</dd>`).join('')}</dl>
+    </div>
+    <div class="setting">
+      <div class="setting-head"><label>Build</label></div>
+      <dl class="kv settings-kv">
+        <dt>Version</dt><dd>beta 1.4</dd>
+        <dt>Channel</dt><dd>pre-release</dd>
+        <dt>Protection</dt><dd>5 tiers, re-checked on every end request</dd>
+      </dl>
+      <p class="setting-note">Betas stay pre-releases until the owner confirms one. Nothing is ever marked Latest.</p>
+    </div>`;
 }
 
 // --------------------------------------------------------------- clean menu --
@@ -1116,6 +1428,7 @@ async function refresh(force = false) {
     const data = await api(`/api/snapshot${force ? '?fresh=1' : ''}`);
     state.snap = data;
     state.error = null;
+    pushHistory(data);
     if (state.focused && !data.processes.some((p) => p.pid === state.focused)) {
       state.focused = null;
       state.detailPid = null;
@@ -1148,10 +1461,13 @@ function schedule() {
 
 function render() {
   updateHeaderStats();
-  renderViews();
-  renderSortChips();
-  renderRows();
-  if (state.focused) {
+  if (state.page === 'processes') {
+    renderSortChips();
+    renderRows();
+  } else {
+    renderGraphs();
+  }
+  if (state.page === 'processes' && state.focused) {
     const proc = byPid().get(state.focused);
     if (proc) renderDetail(proc);
   } else {
@@ -1170,19 +1486,13 @@ function wire() {
     renderRows();
   });
 
-  $('#views').addEventListener('click', (event) => {
-    const button = event.target.closest('[data-view]');
-    if (!button) return;
-    state.view = button.dataset.view;
-    render();
+  // Page navigation ---------------------------------------------------------
+  document.querySelectorAll('.nav-item[data-page]').forEach((button) => {
+    button.addEventListener('click', () => setPage(button.dataset.page));
   });
-
-  $('#presets').addEventListener('click', (event) => {
-    const button = event.target.closest('[data-sort]');
-    if (!button) return;
-    const [key, dir] = button.dataset.sort.split(':');
-    state.sorts = [{ key, dir }];
-    render();
+  $('#nav-settings').addEventListener('click', () => openSettings());
+  window.addEventListener('resize', () => {
+    if (state.page === 'graphs') renderGraphs();
   });
 
   document.querySelectorAll('.grid thead th[data-sort-key]').forEach((th) => {
@@ -1191,20 +1501,6 @@ function wire() {
 
   $('#btn-clear-sort').addEventListener('click', () => {
     state.sorts = [];
-    render();
-  });
-
-  $('#opt-group').addEventListener('change', (event) => {
-    state.group = event.target.checked;
-    state.expanded.clear();
-    render();
-  });
-
-  $('#opt-system').addEventListener('change', (event) => {
-    state.showSystem = event.target.checked;
-    $('#system-note').textContent = state.showSystem
-      ? 'System and protected processes are listed by default and labelled. TM2 never removes them from the list.'
-      : 'System processes are currently hidden by your own filter, not by Task Manager 2. The count stays visible in the status bar.';
     render();
   });
 
@@ -1325,7 +1621,6 @@ function wire() {
     state.view = 'all';
     state.showSystem = true;
     $('#search').value = '';
-    $('#opt-system').checked = true;
     render();
   });
 
@@ -1381,6 +1676,7 @@ function wire() {
 
 wire();
 hydrateCleanPrefs();
+hydrateGraphPrefs();
 try {
   const savedInterval = Number(localStorage.getItem('tm2.pollMs'));
   if (Number.isFinite(savedInterval) && savedInterval >= 1000 && savedInterval <= 15000) state.pollMs = savedInterval;

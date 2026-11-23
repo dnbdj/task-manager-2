@@ -20,7 +20,7 @@
       </svg>
       <div class="brand-text">
         <h1>Task Manager 2</h1>
-        <span class="beta-chip" title="Pre-release build. Stays in beta until the owner confirms it.">BETA 1.3</span>
+        <span class="beta-chip" title="Pre-release build. Stays in beta until the owner confirms it.">BETA 1.4</span>
       </div>
     </div>
 
@@ -124,47 +124,23 @@
   </div>
 
   <main class="layout">
-    <aside class="rail">
-      <section class="rail-block">
-        <h2>Views</h2>
-        <div id="views" class="rail-list"></div>
-      </section>
+    <nav class="nav" aria-label="Sections">
+      <button class="nav-item active" data-page="processes" title="Processes">
+        <svg viewBox="0 0 16 16" aria-hidden="true"><rect x="2" y="2.8" width="12" height="2.3" rx="1.1" fill="currentColor"/><rect x="2" y="6.9" width="12" height="2.3" rx="1.1" fill="currentColor" opacity=".72"/><rect x="2" y="11" width="12" height="2.3" rx="1.1" fill="currentColor" opacity=".45"/></svg>
+        <span>Processes</span>
+      </button>
+      <button class="nav-item" data-page="graphs" title="Graphs">
+        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.6 12.6V9.2M6.4 12.6V5.4M10.2 12.6V7.4M14 12.6V3.4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+        <span>Graphs</span>
+      </button>
+      <div class="nav-fill"></div>
+      <button class="nav-item nav-settings" id="nav-settings" title="Settings — everything that used to sit in this column">
+        <svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="2.3" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M8 1.6v1.8M8 12.6v1.8M1.6 8h1.8M12.6 8h1.8M3.5 3.5l1.3 1.3M11.2 11.2l1.3 1.3M12.5 3.5l-1.3 1.3M4.8 11.2l-1.3 1.3" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
+        <span>Settings</span>
+      </button>
+    </nav>
 
-      <section class="rail-block">
-        <h2>Sort presets</h2>
-        <div id="presets" class="rail-list">
-          <button class="rail-item" data-sort="cpu:desc">Busiest first</button>
-          <button class="rail-item" data-sort="ws:desc">Biggest memory</button>
-          <button class="rail-item" data-sort="start:desc">Newest first</button>
-          <button class="rail-item" data-sort="name:asc">Name A→Z</button>
-          <button class="rail-item" data-sort="pid:asc">PID</button>
-        </div>
-      </section>
-
-      <section class="rail-block">
-        <h2>Options</h2>
-        <label class="switch">
-          <input type="checkbox" id="opt-group" checked />
-          <span class="switch-track"><i></i></span>
-          <span>Group by app</span>
-        </label>
-        <label class="switch">
-          <input type="checkbox" id="opt-system" checked />
-          <span class="switch-track"><i></i></span>
-          <span>Show system processes</span>
-        </label>
-        <p class="rail-note" id="system-note">System and protected processes are listed by default and labelled. TM2 never removes them from the list.</p>
-      </section>
-
-      <section class="rail-block rail-summary">
-        <h2>This machine</h2>
-        <dl id="machine" class="kv">
-          <dt>Host</dt><dd>–</dd>
-        </dl>
-      </section>
-    </aside>
-
-    <section class="table-area">
+    <section class="table-area" id="page-processes">
       <div class="table-toolbar">
         <div class="toolbar-left">
           <span id="view-title" class="view-title">All processes</span>
@@ -218,6 +194,43 @@
         </label>
         <span id="status-interval" class="mini-label" title="Refresh interval — change it in Settings">3s</span>
       </div>
+    </section>
+
+    <section class="graphs hidden" id="page-graphs">
+      <div class="graphs-head">
+        <div>
+          <h2>System graphs</h2>
+          <p class="muted" id="graphs-sub">Filling the window as samples arrive…</p>
+        </div>
+        <div class="graphs-legend">
+          <span class="lg lg-cpu"></span>CPU
+          <span class="lg lg-ram"></span>Memory
+          <span class="lg lg-disk"></span>Disk
+        </div>
+      </div>
+
+      <div class="graph-grid">
+        <article class="graph-card">
+          <header><span>CPU</span><b id="g-cpu-now">–</b></header>
+          <canvas id="chart-cpu"></canvas>
+          <footer id="g-cpu-foot">–</footer>
+        </article>
+        <article class="graph-card">
+          <header><span>Memory</span><b id="g-ram-now">–</b></header>
+          <canvas id="chart-ram"></canvas>
+          <footer id="g-ram-foot">–</footer>
+        </article>
+        <article class="graph-card">
+          <header><span>Disk</span><b id="g-disk-now">–</b></header>
+          <canvas id="chart-disk"></canvas>
+          <footer id="g-disk-foot">–</footer>
+        </article>
+      </div>
+
+      <article class="graph-card graph-wide">
+        <header><span>CPU and memory together</span><b id="g-both-now">–</b></header>
+        <canvas id="chart-both"></canvas>
+      </article>
     </section>
 
     <aside class="detail hidden" id="detail">
