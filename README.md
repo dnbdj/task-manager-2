@@ -2,7 +2,7 @@
 
 A Windows Task Manager replacement that shows every process, sorts on anything, and tells you what breaks before you end something important.
 
-> **Status: beta 1.0 (pre-release).** Not confirmed stable. See [VERSIONS.md](VERSIONS.md).
+> **Status: beta 1.1 (pre-release).** Not confirmed stable. See [VERSIONS.md](VERSIONS.md).
 
 ## Why
 
