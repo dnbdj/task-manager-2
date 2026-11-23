@@ -1,7 +1,7 @@
 {
   "name": "task-manager-2",
   "productName": "Task Manager 2",
-  "version": "1.1.0-beta.1",
+  "version": "1.2.0-beta.1",
   "private": true,
   "description": "A Windows Task Manager that shows every process, sorts on anything, and warns you before you break Windows.",
   "type": "module",
@@ -9,7 +9,7 @@
   "scripts": {
     "start": "node server/index.mjs",
     "desktop": "electron .",
-    "check": "node --check server/index.mjs && node --check server/win.mjs && node --check server/protection.mjs && node --check server/quickclean.mjs && node --check public/app.js && node --check electron/main.js"
+    "check": "node --check server/index.mjs && node --check server/win.mjs && node --check server/protection.mjs && node --check server/quickclean.mjs && node --check server/clean.mjs && node --check public/app.js && node --check electron/main.js && node --input-type=module -e \"await import('./server/clean.mjs'); await import('./server/protection.mjs'); await import('./server/quickclean.mjs');\""
   },
   "engines": {
     "node": ">=20"

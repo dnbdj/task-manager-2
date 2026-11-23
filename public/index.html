@@ -20,7 +20,7 @@
       </svg>
       <div class="brand-text">
         <h1>Task Manager 2</h1>
-        <span class="beta-chip" title="Pre-release build. Stays in beta until the owner confirms it.">BETA 1.1</span>
+        <span class="beta-chip" title="Pre-release build. Stays in beta until the owner confirms it.">BETA 1.2</span>
       </div>
     </div>
 
@@ -57,10 +57,48 @@
         <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M13 8a5 5 0 1 1-1.6-3.7M13 2.5V6h-3.4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
         Refresh
       </button>
-      <button id="btn-quickclean" class="btn btn-accent" title="Find safe wins and close them in one go">
-        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 13 9.5 6.5M10 3l3 3M6 10l-3 3" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/><circle cx="11.5" cy="4.5" r="1.6" fill="currentColor"/></svg>
-        Quick Clean
-      </button>
+      <div class="clean-wrap">
+        <button id="btn-clean" class="btn btn-accent" aria-haspopup="true" aria-expanded="false" title="Clean the ticked categories">
+          <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 13 9.5 6.5M10 3l3 3M6 10l-3 3" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/><circle cx="11.5" cy="4.5" r="1.6" fill="currentColor"/></svg>
+          Clean
+          <span class="caret-down">▾</span>
+        </button>
+        <div id="clean-menu" class="clean-menu hidden" role="menu" aria-label="Clean up">
+          <div class="clean-menu-head">
+            <span>Clean up</span>
+            <span class="clean-menu-hint">tick what to clean</span>
+          </div>
+          <label class="clean-opt">
+            <input type="checkbox" data-clean="cpu" />
+            <span class="co-text"><b>CPU</b><small>Close background processes using CPU — you review them first</small></span>
+            <span class="co-stat" data-clean-stat="cpu">–</span>
+          </label>
+          <label class="clean-opt">
+            <input type="checkbox" data-clean="gpu" />
+            <span class="co-text"><b>GPU</b><small>Delete the DirectX shader cache — rebuilt by the driver</small></span>
+            <span class="co-stat" data-clean-stat="gpu">–</span>
+          </label>
+          <label class="clean-opt">
+            <input type="checkbox" data-clean="ram" />
+            <span class="co-text"><b>RAM</b><small>Trim idle background working sets — nothing is closed</small></span>
+            <span class="co-stat" data-clean-stat="ram">–</span>
+          </label>
+          <label class="clean-opt">
+            <input type="checkbox" data-clean="internet" />
+            <span class="co-text"><b>Internet</b><small>Flush the DNS resolver cache</small></span>
+            <span class="co-stat" data-clean-stat="internet">–</span>
+          </label>
+          <label class="clean-opt">
+            <input type="checkbox" data-clean="storage" />
+            <span class="co-text"><b>Storage</b><small>Delete temp files older than 24 hours</small></span>
+            <span class="co-stat" data-clean-stat="storage">–</span>
+          </label>
+          <div class="clean-menu-foot">
+            <button id="btn-clean-refresh" class="btn btn-tiny btn-ghost" title="Re-scan">Rescan</button>
+            <button id="btn-clean-run" class="btn btn-accent btn-small">Clean</button>
+          </div>
+        </div>
+      </div>
       <button id="btn-report" class="btn btn-ghost" title="Download every process as JSON">Report</button>
     </div>
   </header>
@@ -92,7 +130,7 @@
       <section class="rail-block">
         <h2>Options</h2>
         <label class="switch">
-          <input type="checkbox" id="opt-group" />
+          <input type="checkbox" id="opt-group" checked />
           <span class="switch-track"><i></i></span>
           <span>Group by app</span>
         </label>

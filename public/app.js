@@ -84,7 +84,7 @@ const state = {
   q: '',
   view: 'all',
   showSystem: true,
-  group: false,
+  group: true,
   sorts: [{ key: 'cpu', dir: 'desc' }],
   selected: new Set(),
   focused: null,
@@ -98,6 +98,9 @@ const state = {
   modal: null,
   qcSelected: new Set(),
   qcData: null,
+  cleanPrefs: { cpu: true, gpu: true, ram: true, internet: true, storage: true },
+  cleanPreview: null,
+  cleanBusy: false,
 };
 
 const byPid = () => new Map((state.snap?.processes || []).map((p) => [p.pid, p]));
@@ -409,7 +412,7 @@ function renderRows() {
       return `<tr class="group-row tier-${esc(g.protection.tier)}${open ? ' open' : ''}" data-group="${esc(g.key)}">
         <td class="col-check"><input type="checkbox" data-group-check="${esc(g.key)}" ${allSelected ? 'checked' : ''} /></td>
         <td class="col-risk">${riskCell(g.protection.tier)}</td>
-        <td class="col-name"><span class="caret">▶</span><span class="proc-name">${esc(g.name)}</span><span class="group-count">${g.count}×</span>
+        <td class="col-name"><span class="caret">▶</span><span class="folder-ico">${FOLDER_SVG}</span><span class="proc-name">${esc(g.name)}</span><span class="group-count">${g.count}×</span>
           <span class="proc-title" style="margin-left:8px">${esc(title)}</span></td>
         <td class="col-num">${g.count}</td>
         <td class="col-num ${g.cpu >= 25 ? 'cpu-hot' : g.cpu >= 5 ? 'cpu-warm' : ''}">${fmtPct(g.cpu)}</td>
@@ -583,6 +586,8 @@ function renderDetail(proc) {
 }
 
 const warnIcon = () => '<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M8 1.8 15 14H1L8 1.8Z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/><path d="M8 6v3.4M8 11.4v.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>';
+
+const FOLDER_SVG = '<svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true"><path d="M1.5 4.3a1 1 0 0 1 1-1h3.2l1.2 1.4h6.6a1 1 0 0 1 1 1v6a1 1 0 0 1-1 1h-11a1 1 0 0 1-1-1V4.3Z" fill="currentColor"/></svg>';
 
 // ------------------------------------------------------------------ modals --
 
@@ -771,12 +776,12 @@ async function confirmEnd({ pids, tree, confirmations, names, memory }) {
 
 // -------------------------------------------------------------- quick clean --
 
-async function openQuickClean() {
+async function openProcessReview() {
   const modal = el('div', 'modal wide');
   modal.innerHTML = `
     <div class="modal-head">
-      <h2>Quick Clean</h2>
-      <p>Scanning for background processes that can be closed without touching anything Windows needs…</p>
+      <h2>Close background processes</h2>
+      <p>Everything below is a candidate, with the reason it was picked. Nothing closes until you confirm.</p>
     </div>
     <div class="modal-body"><div class="qc-none">Scanning…</div></div>
     <div class="modal-foot"><button class="btn btn-ghost" data-cancel>Cancel</button></div>`;
@@ -901,6 +906,108 @@ function renderQuickClean(modal, data) {
     });
   });
   sync();
+}
+
+// --------------------------------------------------------------- clean menu --
+
+const CLEAN_IDS = ['cpu', 'gpu', 'ram', 'internet', 'storage'];
+const CLEAN_PREFS_KEY = 'tm2.cleanPrefs';
+
+function hydrateCleanPrefs() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(CLEAN_PREFS_KEY) || 'null');
+    if (saved && typeof saved === 'object') {
+      for (const id of CLEAN_IDS) {
+        if (typeof saved[id] === 'boolean') state.cleanPrefs[id] = saved[id];
+      }
+    }
+  } catch { /* storage unavailable: keep defaults */ }
+  syncCleanInputs();
+}
+
+function saveCleanPrefs() {
+  try { localStorage.setItem(CLEAN_PREFS_KEY, JSON.stringify(state.cleanPrefs)); } catch {}
+}
+
+function syncCleanInputs() {
+  document.querySelectorAll('[data-clean]').forEach((box) => {
+    box.checked = Boolean(state.cleanPrefs[box.dataset.clean]);
+  });
+  syncCleanButton();
+}
+
+function selectedCleanCategories() {
+  return CLEAN_IDS.filter((id) => state.cleanPrefs[id]);
+}
+
+function syncCleanButton() {
+  const button = $('#btn-clean-run');
+  const count = selectedCleanCategories().length;
+  button.disabled = count === 0 || state.cleanBusy;
+  button.textContent = state.cleanBusy ? 'Cleaning…' : count === 0 ? 'Nothing ticked' : `Clean ${count}`;
+}
+
+function setCleanMenu(open) {
+  $('#clean-menu').classList.toggle('hidden', !open);
+  $('#btn-clean').setAttribute('aria-expanded', String(open));
+  if (open) {
+    syncCleanInputs();
+    loadCleanPreview();
+  }
+}
+
+async function loadCleanPreview() {
+  const setStat = (id, text) => {
+    const node = document.querySelector(`[data-clean-stat="${id}"]`);
+    if (node) node.textContent = text;
+  };
+  CLEAN_IDS.forEach((id) => setStat(id, '…'));
+  try {
+    const data = await api('/api/clean/preview');
+    state.cleanPreview = data;
+    setStat('cpu', data.cpu.count ? `${data.cpu.count} busy` : 'idle');
+    setStat('gpu', data.gpu.bytes ? fmtBytes(data.gpu.bytes) : 'empty');
+    setStat('ram', data.ram.count ? `${data.ram.count} · ${fmtBytes(data.ram.bytes)}` : 'nothing idle');
+    setStat('internet', 'ready');
+    setStat('storage', data.storage.bytes ? `${data.storage.files} · ${fmtBytes(data.storage.bytes)}` : 'clean');
+  } catch {
+    CLEAN_IDS.forEach((id) => setStat(id, 'n/a'));
+  }
+}
+
+async function runCleanNow() {
+  const ticked = selectedCleanCategories();
+  if (!ticked.length) return;
+  const fileCategories = ticked.filter((id) => id !== 'cpu');
+  const wantsCpu = ticked.includes('cpu');
+  setCleanMenu(false);
+
+  if (fileCategories.length) {
+    state.cleanBusy = true;
+    syncCleanButton();
+    try {
+      const result = await api('/api/clean', { method: 'POST', body: { categories: fileCategories } });
+      const parts = [];
+      const r = result.results || {};
+      if (r.ram) parts.push(`trimmed ${r.ram.trimmed} processes`);
+      if (r.gpu) parts.push(`GPU cache ${fmtBytes(r.gpu.freedBytes)}`);
+      if (r.storage) parts.push(`${r.storage.files} temp files ${fmtBytes(r.storage.freedBytes)}`);
+      if (r.internet?.flushed) parts.push('DNS flushed');
+      toast('ok', result.freedBytes > 0 ? `Freed ${fmtBytes(result.freedBytes)}` : 'Clean finished',
+        parts.join(' · ') || 'Nothing needed removing.', 9000);
+      const skipped = (r.storage?.failed || 0) + (r.gpu?.failed || 0);
+      if (skipped) toast('ok', `${skipped} file${skipped === 1 ? '' : 's'} skipped`, 'In use by a running app.', 6000);
+    } catch (error) {
+      toast('err', 'Clean failed', error.message, 9000);
+    } finally {
+      state.cleanBusy = false;
+      syncCleanButton();
+      await refresh(true);
+    }
+  }
+
+  // CPU is the one destructive category: it goes through the reviewed list.
+  if (wantsCpu) openProcessReview();
 }
 
 // -------------------------------------------------------------------- data --
@@ -1078,7 +1185,30 @@ function wire() {
   });
 
   $('#btn-refresh').addEventListener('click', () => refresh(true));
-  $('#btn-quickclean').addEventListener('click', openQuickClean);
+  // Clean dropdown ---------------------------------------------------------
+  $('#btn-clean').addEventListener('click', (event) => {
+    event.stopPropagation();
+    setCleanMenu($('#clean-menu').classList.contains('hidden'));
+  });
+  $('#clean-menu').addEventListener('click', (event) => event.stopPropagation());
+  document.addEventListener('click', () => {
+    if (!$('#clean-menu').classList.contains('hidden')) setCleanMenu(false);
+  });
+  document.querySelectorAll('[data-clean]').forEach((box) => {
+    box.addEventListener('change', () => {
+      state.cleanPrefs[box.dataset.clean] = box.checked;
+      saveCleanPrefs();
+      syncCleanButton();
+    });
+  });
+  $('#btn-clean-refresh').addEventListener('click', (event) => {
+    event.stopPropagation();
+    loadCleanPreview();
+  });
+  $('#btn-clean-run').addEventListener('click', (event) => {
+    event.stopPropagation();
+    runCleanNow();
+  });
   $('#btn-report').addEventListener('click', () => {
     // The report endpoint needs the session token, so fetch it and save a blob.
     api('/api/report').then((data) => {
@@ -1157,6 +1287,7 @@ function wire() {
 // -------------------------------------------------------------------- boot --
 
 wire();
+hydrateCleanPrefs();
 schedule();
 refresh(true);
 setInterval(() => { if (state.snap && !document.hidden) updateHeaderStats(); }, 15000);

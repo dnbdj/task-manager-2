@@ -168,7 +168,8 @@ async function createWindow() {
     // window on screen so the message is actually readable.
     const message = String(error.message || error).replace(/[<>&]/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;' }[c]));
     await mainWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(
-      `<body style="background:#080b10;color:#f87171;font-family:Segoe UI,sans-serif;padding:40px;line-height:1.6">
+      `<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'">
+       <body style="background:#080b10;color:#f87171;font-family:Segoe UI,sans-serif;padding:40px;line-height:1.6">
          <h2 style="margin:0 0 8px">Task Manager 2 could not start</h2>
          <p style="color:#fca5a5">${message}</p>
          <p style="color:#8496a9;font-size:13px">Details were written to .desktop.log next to the app.</p>

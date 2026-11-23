@@ -2,7 +2,7 @@
 
 A Windows Task Manager replacement that shows every process, sorts on anything, and tells you what breaks before you end something important.
 
-> **Status: beta 1.1 (pre-release).** Not confirmed stable. See [VERSIONS.md](VERSIONS.md).
+> **Status: beta 1.2 (pre-release).** Not confirmed stable. See [VERSIONS.md](VERSIONS.md).
 
 ## Why
 
@@ -26,9 +26,23 @@ Warnings also fire automatically for an open window with unsaved work, for child
 
 The protection table is re-checked **on the server for every kill request**, so a stale or hand-edited tab cannot end a protected process.
 
-**Sorting that holds up.** Click any column to sort, shift-click to stack up to three sorts (numbered chips show the stack), numeric-aware with stable tie-breaks so rows do not jitter between samples. Presets for busiest, biggest memory, newest and name. Search matches name, PID, window title, path, command line and parent. **Group by app** collapses instances into one row with summed CPU and memory, and can select a whole group at once.
+**Sorting that holds up.** Click any column to sort, shift-click to stack up to three sorts (numbered chips show the stack), numeric-aware with stable tie-breaks so rows do not jitter between samples. Presets for busiest, biggest memory, newest and name. Search matches name, PID, window title, path, command line and parent.
 
-**Quick Clean that explains itself.** One button opens a reviewed list of candidates grouped as idle browser helpers, leftover build tools, windowless apps, large background processes, apps not responding and orphaned processes. Each row states why it was picked and how much memory it returns. Nothing is ended until you tick the acknowledgement and press the button.
+**Folders, like Task Manager.** The list opens grouped: every app is a folder row with a chevron, an instance count and summed CPU and memory, and expanding it shows the processes inside. A folder checkbox selects the whole group at once. Turn the folder view off in the left rail for a flat list.
+
+**Clean, with tickboxes.** The **Clean** button opens a dropdown with five categories, the way a memory cleaner does. Tick what you want and press Clean:
+
+| Category | What it does |
+|---|---|
+| **CPU** | Finds background processes using CPU and opens the reviewed list so you choose what closes. Nothing is killed silently. |
+| **GPU** | Deletes the DirectX shader cache (D3D, NVIDIA, AMD, Intel). The driver rebuilds it; nothing is lost. |
+| **RAM** | Trims the working sets of idle background processes. Nothing is closed, and the freed amount is measured, not guessed. |
+| **Internet** | Flushes the DNS resolver cache. |
+| **Storage** | Deletes temp files older than 24 hours from your temp folder and `Windows\Temp`. Files still in use are skipped and reported. |
+
+The dropdown shows what each ticked category actually found (process count, megabytes, file count) before you press anything, and your ticks are remembered between launches.
+
+**Process review that explains itself.** The CPU category opens a reviewed list — idle browser helpers, leftover build tools, windowless apps, large background processes, apps not responding, orphaned processes — with the reason each was picked. Nothing is ended until you tick the acknowledgement and press the button.
 
 ## Running it
 

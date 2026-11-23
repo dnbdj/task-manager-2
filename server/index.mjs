@@ -12,6 +12,7 @@ import {
   collectOnce, endProcesses, IS_WINDOWS,
 } from './win.mjs';
 import { buildQuickClean } from './quickclean.mjs';
+import { previewClean, runClean } from './clean.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = path.join(here, '..', 'public');
@@ -145,6 +146,15 @@ const server = http.createServer(async (req, res) => {
       return json(res, 200, { ok: true, ...buildQuickClean(snapshot) });
     }
 
+    if (req.method === 'GET' && pathname === '/api/clean/preview') {
+      return json(res, 200, { ok: true, ...(await previewClean()) });
+    }
+
+    if (req.method === 'POST' && pathname === '/api/clean') {
+      const body = await readBody(req);
+      return json(res, 200, await runClean(body));
+    }
+
     if (req.method === 'GET' && pathname.startsWith('/api/process/')) {
       const pid = Number(pathname.split('/').pop());
       if (!Number.isInteger(pid) || pid <= 0) return json(res, 400, { ok: false, error: 'Bad PID.' });
@@ -157,7 +167,7 @@ const server = http.createServer(async (req, res) => {
       res.setHeader('content-disposition', `attachment; filename="task-manager-2-report-${stamp}.json"`);
       return json(res, 200, {
         app: 'Task Manager 2',
-        version: '1.1.0-beta.1',
+        version: '1.2.0-beta.1',
         generatedAt: new Date().toISOString(),
         note: 'Complete process list. Nothing is filtered out of this report.',
         snapshot,
@@ -199,7 +209,7 @@ function listen(attempt = 0) {
     port = server.address().port;
     const url = `http://${HOST}:${port}`;
     console.log('');
-    console.log('  Task Manager 2  -  beta 1.1');
+    console.log('  Task Manager 2  -  beta 1.2');
     console.log(`  ${url}`);
     console.log(`  platform: ${process.platform}`);
     console.log('  Nothing is filtered. Every end request is re-checked server-side.');

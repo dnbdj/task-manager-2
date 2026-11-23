@@ -19,6 +19,25 @@ const POWERSHELL = process.env.SystemRoot
 
 export const IS_WINDOWS = process.platform === 'win32';
 
+/** Run a PowerShell script or command and resolve with its stdout. */
+export function runPowerShell(args, { timeout = 45000 } = {}) {
+  return new Promise((resolve, reject) => {
+    execFile(
+      POWERSHELL,
+      ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', ...args],
+      { windowsHide: true, timeout, maxBuffer: 32 * 1024 * 1024, encoding: 'utf8' },
+      (error, stdout, stderr) => {
+        if (error) {
+          error.message = `${error.message}${stderr ? ` :: ${String(stderr).trim()}` : ''}`;
+          reject(error);
+          return;
+        }
+        resolve(stdout);
+      },
+    );
+  });
+}
+
 // ------------------------------------------------------------------- host ----
 
 let host = null;
