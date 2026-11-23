@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="tm2-token" content="__TM2_TOKEN__" />
+<title>Task Manager 2</title>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+<link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+<div class="app">
+
+  <header class="topbar">
+    <div class="brand">
+      <svg class="brand-mark" viewBox="0 0 32 32" aria-hidden="true">
+        <rect x="2" y="2" width="28" height="28" rx="7" fill="#0e1a22" stroke="#38bdf8" stroke-width="1.5"/>
+        <path d="M9 20.5 14 12l3.5 6 2.5-4 3 6.5" fill="none" stroke="#4ade80" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+      <div class="brand-text">
+        <h1>Task Manager 2</h1>
+        <span class="beta-chip" title="Pre-release build. Stays in beta until the owner confirms it.">BETA 1.0</span>
+      </div>
+    </div>
+
+    <div class="stats" id="stats">
+      <div class="stat" id="stat-cpu">
+        <div class="stat-head"><span class="stat-label">CPU</span><span class="stat-value" data-v>–</span></div>
+        <div class="meter"><i data-bar></i></div>
+      </div>
+      <div class="stat" id="stat-ram">
+        <div class="stat-head"><span class="stat-label">Memory</span><span class="stat-value" data-v>–</span></div>
+        <div class="meter"><i data-bar></i></div>
+      </div>
+      <div class="stat" id="stat-disk">
+        <div class="stat-head"><span class="stat-label">Disk</span><span class="stat-value" data-v>–</span></div>
+        <div class="meter"><i data-bar></i></div>
+      </div>
+      <div class="stat stat-plain">
+        <div class="stat-head"><span class="stat-label">Processes</span><span class="stat-value" data-v>–</span></div>
+        <div class="stat-sub" data-sub>&nbsp;</div>
+      </div>
+      <div class="stat stat-plain">
+        <div class="stat-head"><span class="stat-label">Uptime</span><span class="stat-value" data-v>–</span></div>
+        <div class="stat-sub" data-sub>&nbsp;</div>
+      </div>
+    </div>
+
+    <div class="topbar-actions">
+      <div class="search-wrap">
+        <svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="7" cy="7" r="4.4" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="m10.4 10.4 3 3" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+        <input id="search" type="search" placeholder="Filter name, PID, window, path…" autocomplete="off" spellcheck="false" />
+        <kbd>Ctrl F</kbd>
+      </div>
+      <button id="btn-refresh" class="btn btn-ghost" title="Refresh now">
+        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M13 8a5 5 0 1 1-1.6-3.7M13 2.5V6h-3.4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        Refresh
+      </button>
+      <button id="btn-quickclean" class="btn btn-accent" title="Find safe wins and close them in one go">
+        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 13 9.5 6.5M10 3l3 3M6 10l-3 3" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/><circle cx="11.5" cy="4.5" r="1.6" fill="currentColor"/></svg>
+        Quick Clean
+      </button>
+      <button id="btn-report" class="btn btn-ghost" title="Download every process as JSON">Report</button>
+    </div>
+  </header>
+
+  <div id="admin-banner" class="banner hidden">
+    <span class="banner-dot"></span>
+    <span>Running <strong>not elevated</strong>. Windows will refuse to end processes you do not own — those failures are shown, never hidden.</span>
+    <button id="btn-elevate" class="btn btn-small">Restart as administrator</button>
+  </div>
+
+  <main class="layout">
+    <aside class="rail">
+      <section class="rail-block">
+        <h2>Views</h2>
+        <div id="views" class="rail-list"></div>
+      </section>
+
+      <section class="rail-block">
+        <h2>Sort presets</h2>
+        <div id="presets" class="rail-list">
+          <button class="rail-item" data-sort="cpu:desc">Busiest first</button>
+          <button class="rail-item" data-sort="ws:desc">Biggest memory</button>
+          <button class="rail-item" data-sort="start:desc">Newest first</button>
+          <button class="rail-item" data-sort="name:asc">Name A→Z</button>
+          <button class="rail-item" data-sort="pid:asc">PID</button>
+        </div>
+      </section>
+
+      <section class="rail-block">
+        <h2>Options</h2>
+        <label class="switch">
+          <input type="checkbox" id="opt-group" />
+          <span class="switch-track"><i></i></span>
+          <span>Group by app</span>
+        </label>
+        <label class="switch">
+          <input type="checkbox" id="opt-system" checked />
+          <span class="switch-track"><i></i></span>
+          <span>Show system processes</span>
+        </label>
+        <p class="rail-note" id="system-note">System and protected processes are listed by default and labelled. TM2 never removes them from the list.</p>
+      </section>
+
+      <section class="rail-block rail-summary">
+        <h2>This machine</h2>
+        <dl id="machine" class="kv">
+          <dt>Host</dt><dd>–</dd>
+        </dl>
+      </section>
+    </aside>
+
+    <section class="table-area">
+      <div class="table-toolbar">
+        <div class="toolbar-left">
+          <span id="view-title" class="view-title">All processes</span>
+          <span id="selection-count" class="sel-count hidden"></span>
+        </div>
+        <div class="toolbar-right">
+          <div id="sort-chips" class="sort-chips"></div>
+          <button id="btn-clear-sort" class="btn btn-tiny hidden">Reset sort</button>
+          <div class="bulk hidden" id="bulk">
+            <button id="btn-end-selected" class="btn btn-small btn-danger">End selected</button>
+            <button id="btn-clear-selection" class="btn btn-small btn-ghost">Clear</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="table-scroll" id="table-scroll">
+        <table class="grid">
+          <thead>
+            <tr>
+              <th class="col-check"><input type="checkbox" id="select-all" title="Select everything in view" /></th>
+              <th class="col-risk" data-sort-key="risk" title="Protection level">Risk</th>
+              <th class="col-name sortable" data-sort-key="name">Process</th>
+              <th class="col-num sortable" data-sort-key="pid">PID</th>
+              <th class="col-num sortable" data-sort-key="cpu">CPU %</th>
+              <th class="col-num sortable" data-sort-key="ws">Memory</th>
+              <th class="col-num sortable" data-sort-key="threads">Threads</th>
+              <th class="col-num sortable" data-sort-key="handles">Handles</th>
+              <th class="col-num sortable" data-sort-key="session">Session</th>
+              <th class="col-status sortable" data-sort-key="status">Status</th>
+              <th class="col-start sortable" data-sort-key="start">Started</th>
+            </tr>
+          </thead>
+          <tbody id="rows"></tbody>
+        </table>
+        <div id="empty" class="empty hidden">
+          <p>Nothing matches this view.</p>
+          <button class="btn btn-small" id="btn-clear-view">Clear filters</button>
+        </div>
+      </div>
+
+      <div class="statusbar">
+        <span id="status-showing">Waiting for the first sample…</span>
+        <span class="sep"></span>
+        <span id="status-updated">–</span>
+        <span class="sep"></span>
+        <span id="status-elevated">–</span>
+        <span class="grow"></span>
+        <label class="live">
+          <input type="checkbox" id="opt-live" checked />
+          Live
+        </label>
+        <select id="opt-interval" class="mini-select" title="Refresh interval">
+          <option value="2000">2s</option>
+          <option value="3000" selected>3s</option>
+          <option value="5000">5s</option>
+          <option value="10000">10s</option>
+        </select>
+      </div>
+    </section>
+
+    <aside class="detail hidden" id="detail">
+      <div class="detail-head">
+        <div>
+          <h2 id="detail-name">–</h2>
+          <p id="detail-sub" class="muted">–</p>
+        </div>
+        <button class="btn btn-tiny btn-ghost" id="detail-close" title="Close">✕</button>
+      </div>
+      <div id="detail-tier" class="detail-tier"></div>
+      <div id="detail-body" class="detail-body"></div>
+      <div class="detail-actions">
+        <button class="btn btn-danger" id="detail-end">End task</button>
+        <button class="btn btn-ghost" id="detail-tree">End tree</button>
+      </div>
+    </aside>
+  </main>
+</div>
+
+<div id="toasts" class="toasts" aria-live="polite"></div>
+<div id="modal-root"></div>
+
+<script type="module" src="/app.js"></script>
+</body>
+</html>

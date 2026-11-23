@@ -1,0 +1,17 @@
+node_modules/
+dist/
+out/
+.electron-install.log
+*.log
+npm-debug.log*
+.DS_Store
+Thumbs.db
+*.json.gz
+snapshots/
+
+# local scratch files from development and verification
+.snap.json
+.host.out
+.host.err
+.api-*.json
+.verify.mjs
