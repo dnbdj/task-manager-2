@@ -908,6 +908,100 @@ function renderQuickClean(modal, data) {
   sync();
 }
 
+// -------------------------------------------------------------- more menu ---
+
+function setMoreMenu(open) {
+  $('#more-menu').classList.toggle('hidden', !open);
+  $('#btn-more').setAttribute('aria-expanded', String(open));
+}
+
+function exportReport() {
+  // The report endpoint needs the session token, so fetch it and build a blob
+  // instead of pointing the browser at the URL.
+  api('/api/report').then((data) => {
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = `task-manager-2-report-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}.json`;
+    anchor.click();
+    setTimeout(() => URL.revokeObjectURL(url), 4000);
+    toast('ok', 'Report exported', `${data.snapshot?.counts?.processes ?? 'All'} processes written to JSON.`);
+  }).catch((error) => toast('err', 'Could not export', error.message));
+}
+
+// ----------------------------------------------------------------- settings --
+
+function paintIntervalLabel() {
+  const seconds = Math.round(state.pollMs / 1000);
+  const label = $('#status-interval');
+  if (label) label.textContent = `${seconds}s`;
+  const slider = $('#set-interval');
+  if (slider) {
+    slider.value = String(seconds);
+    const pct = ((seconds - Number(slider.min)) / (Number(slider.max) - Number(slider.min))) * 100;
+    slider.style.setProperty('--fill', `${pct}%`);
+  }
+  const value = $('#set-interval-value');
+  if (value) value.textContent = `${seconds}s`;
+}
+
+function setPollInterval(ms, { reschedule = true } = {}) {
+  state.pollMs = Math.max(1000, Math.min(15000, Math.round(ms)));
+  try { localStorage.setItem('tm2.pollMs', String(state.pollMs)); } catch {}
+  paintIntervalLabel();
+  if (reschedule) schedule();
+}
+
+function openSettings() {
+  const modal = el('div', 'modal');
+  modal.innerHTML = `
+    <div class="modal-head">
+      <h2>Settings</h2>
+      <p>Changes apply immediately and are remembered on this machine.</p>
+    </div>
+    <div class="modal-body">
+      <div class="setting">
+        <div class="setting-head">
+          <label for="set-interval">Refresh interval</label>
+          <b id="set-interval-value">${Math.round(state.pollMs / 1000)}s</b>
+        </div>
+        <input type="range" id="set-interval" min="1" max="15" step="1" value="${Math.round(state.pollMs / 1000)}" />
+        <div class="range-ticks"><span>1s — fresher, a little more CPU</span><span>15s</span></div>
+      </div>
+      <div class="setting">
+        <div class="setting-head"><label for="set-live">Live updates</label></div>
+        <label class="check-line">
+          <input type="checkbox" id="set-live" ${state.live ? 'checked' : ''} />
+          <span>Keep reading the machine while the window is open. Turning this off freezes the list where it is.</span>
+        </label>
+      </div>
+    </div>
+    <div class="modal-foot"><button class="btn" data-close>Done</button></div>`;
+
+  openModal(modal);
+
+  const slider = modal.querySelector('#set-interval');
+  const pct = ((Math.round(state.pollMs / 1000) - 1) / 14) * 100;
+  slider.style.setProperty('--fill', `${pct}%`);
+
+  slider.addEventListener('input', () => {
+    setPollInterval(Number(slider.value) * 1000, { reschedule: false });
+  });
+  slider.addEventListener('change', () => {
+    schedule();
+    if (state.live) refresh(true);
+  });
+
+  modal.querySelector('#set-live').addEventListener('change', (event) => {
+    state.live = event.target.checked;
+    $('#opt-live').checked = state.live;
+    if (state.live) refresh(true);
+  });
+
+  modal.querySelector('[data-close]').addEventListener('click', closeModal);
+}
+
 // --------------------------------------------------------------- clean menu --
 
 const CLEAN_IDS = ['cpu', 'gpu', 'ram', 'internet', 'storage'];
@@ -1209,18 +1303,21 @@ function wire() {
     event.stopPropagation();
     runCleanNow();
   });
-  $('#btn-report').addEventListener('click', () => {
-    // The report endpoint needs the session token, so fetch it and save a blob.
-    api('/api/report').then((data) => {
-      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
-      const anchor = document.createElement('a');
-      anchor.href = url;
-      anchor.download = `task-manager-2-report-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}.json`;
-      anchor.click();
-      setTimeout(() => URL.revokeObjectURL(url), 4000);
-      toast('ok', 'Report exported', `${data.snapshot?.counts?.processes ?? 'All'} processes written to JSON.`);
-    }).catch((error) => toast('err', 'Could not export', error.message));
+  // More menu (⋯) ----------------------------------------------------------
+  $('#btn-more').addEventListener('click', (event) => {
+    event.stopPropagation();
+    setMoreMenu($('#more-menu').classList.contains('hidden'));
+  });
+  $('#more-menu').addEventListener('click', (event) => event.stopPropagation());
+  document.addEventListener('click', () => {
+    if (!$('#more-menu').classList.contains('hidden')) setMoreMenu(false);
+  });
+  document.querySelectorAll('[data-more]').forEach((button) => {
+    button.addEventListener('click', () => {
+      setMoreMenu(false);
+      if (button.dataset.more === 'settings') openSettings();
+      if (button.dataset.more === 'report') exportReport();
+    });
   });
 
   $('#btn-clear-view').addEventListener('click', () => {
@@ -1237,11 +1334,7 @@ function wire() {
     if (state.live) refresh(true);
   });
 
-  $('#opt-interval').addEventListener('change', (event) => {
-    state.pollMs = Number(event.target.value);
-    schedule();
-    if (state.live) refresh(true);
-  });
+
 
   $('#btn-elevate').addEventListener('click', async () => {
     if (window.tm2?.relaunchAsAdmin) {
@@ -1288,6 +1381,11 @@ function wire() {
 
 wire();
 hydrateCleanPrefs();
+try {
+  const savedInterval = Number(localStorage.getItem('tm2.pollMs'));
+  if (Number.isFinite(savedInterval) && savedInterval >= 1000 && savedInterval <= 15000) state.pollMs = savedInterval;
+} catch { /* storage unavailable */ }
+paintIntervalLabel();
 schedule();
 refresh(true);
 setInterval(() => { if (state.snap && !document.hidden) updateHeaderStats(); }, 15000);

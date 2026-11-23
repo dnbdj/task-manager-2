@@ -2,7 +2,7 @@
 
 A Windows Task Manager replacement that shows every process, sorts on anything, and tells you what breaks before you end something important.
 
-> **Status: beta 1.2 (pre-release).** Not confirmed stable. See [VERSIONS.md](VERSIONS.md).
+> **Status: beta 1.3 (pre-release).** Not confirmed stable. See [VERSIONS.md](VERSIONS.md).
 
 ## Why
 
@@ -10,7 +10,7 @@ Windows Task Manager hides processes it considers unimportant, gives one small c
 
 ## What it does
 
-**Nothing is hidden.** Every process the OS reports is listed by default, including session-0 service processes. Those carry a `SYSTEM` badge and a protection level in their own column. The status bar always states the arithmetic — `Showing 433 of 433 processes · nothing hidden by Task Manager 2` — and if you choose to hide system processes yourself, the number you hid stays on screen. The **Report** button exports the complete list as JSON.
+**Nothing is hidden.** Every process the OS reports is listed by default, including session-0 service processes. Those carry a `SYSTEM` badge and a protection level in their own column. The status bar always states the arithmetic — `Showing 433 of 433 processes · nothing hidden by Task Manager 2` — and if you choose to hide system processes yourself, the number you hid stays on screen. The **⋯ → Export report** item saves the complete list as JSON.
 
 **Warnings that match the risk.** Every process is classified before the End button becomes usable:
 

@@ -17,6 +17,7 @@ Task Manager 2 ships in public betas. Nothing here is stable until the owner say
 | beta 1.0 | 2026-11-23 | `beta-1.0` | Pre-release | First published build. Unfiltered process list, five protection tiers with typed confirmation for critical processes, stacked multi-column sorting, group by app, Quick Clean, JSON report. |
 | beta 1.1 | 2026-11-23 | `beta-1.1` | Pre-release | Desktop shell hardened and proven: startup diagnostics written to `.desktop.log`, server spawn failures surfaced instead of hanging, a readable in-window failure page, and a Content-Security-Policy so the renderer no longer ships without one. |
 | beta 1.2 | 2026-11-23 | `beta-1.2` | Pre-release | Folder-style grouped process list on by default, the way Task Manager's Processes tab nests apps. Clean becomes a dropdown with CPU / GPU / RAM / Internet / Storage tickboxes in the style of memory-cleaner utilities, each reporting what it found before it runs. |
+| beta 1.3 | 2026-11-23 | `beta-1.3` | Pre-release | Fixes the Clean dropdown rendering underneath the process table (the top bar's backdrop filter trapped it in its own stacking context). Report moves into a ⋯ menu alongside Settings, and the refresh interval becomes a slider in Settings instead of a select in the status bar. |
 
 ## Numbering
 
