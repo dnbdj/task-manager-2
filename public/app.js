@@ -107,6 +107,7 @@ const state = {
   graphWindow: 60,
   graphFill: true,
   graphGrid: true,
+  procHistory: new Map(),
 };
 
 const byPid = () => new Map((state.snap?.processes || []).map((p) => [p.pid, p]));
@@ -389,6 +390,37 @@ function renderSortChips() {
   });
 }
 
+function sparkColor(cpu) {
+  if (cpu >= 25) return '#f87171';
+  if (cpu >= 5) return '#fbbf24';
+  return '#38bdf8';
+}
+
+function sparkline(values, { width = 92, height = 14, stroke = '#38bdf8' } = {}) {
+  const nums = (values || []).slice(-32);
+  const base = `<line class="spark-base" x1="0" y1="${height - 1}" x2="${width}" y2="${height - 1}" stroke-width="1" />`;
+  if (nums.length < 2) {
+    return `<svg class="sparkline" viewBox="0 0 ${width} ${height}" width="${width}" height="${height}" aria-hidden="true">${base}</svg>`;
+  }
+  const peak = Math.max(2, ...nums);
+  const step = width / (nums.length - 1);
+  const points = nums
+    .map((value, index) => `${(index * step).toFixed(1)},${(height - 1.5 - (value / peak) * (height - 3)).toFixed(1)}`)
+    .join(' ');
+  return `<svg class="sparkline" viewBox="0 0 ${width} ${height}" width="${width}" height="${height}" aria-hidden="true">${base}<polyline points="${points}" fill="none" stroke="${stroke}" stroke-width="1.4" stroke-linejoin="round" stroke-linecap="round" /></svg>`;
+}
+
+function seriesSum(pids) {
+  const lists = pids.map((pid) => state.procHistory.get(pid) || []);
+  const length = lists.reduce((max, list) => Math.max(max, list.length), 0);
+  const out = new Array(length).fill(0);
+  for (const list of lists) {
+    const offset = length - list.length;
+    for (let i = 0; i < list.length; i += 1) out[offset + i] += list[i];
+  }
+  return out;
+}
+
 function riskCell(tier) {
   return `<span class="risk-pill"><i class="risk-dot"></i>${esc(TIER_LABEL[tier] || tier)}</span>`;
 }
@@ -409,15 +441,11 @@ function renderRows() {
         <td class="col-check"><input type="checkbox" data-group-check="${esc(g.key)}" ${allSelected ? 'checked' : ''} /></td>
         <td class="col-risk">${riskCell(g.protection.tier)}</td>
         <td class="col-name"><span class="caret">▶</span><span class="folder-ico">${FOLDER_SVG}</span><span class="proc-name">${esc(g.name)}</span><span class="group-count">${g.count}×</span>
-          <span class="proc-title" style="margin-left:8px">${esc(title)}</span></td>
+          <span class="row-spark" title="${esc(title)}">${sparkline(seriesSum(g.pids), { stroke: sparkColor(g.cpu) })}</span></td>
         <td class="col-num">${g.count}</td>
         <td class="col-num ${g.cpu >= 25 ? 'cpu-hot' : g.cpu >= 5 ? 'cpu-warm' : ''}">${fmtPct(g.cpu)}</td>
         <td class="col-num mem-strong">${fmtBytes(g.ws)}</td>
-        <td class="col-num">${g.threads}</td>
-        <td class="col-num">${g.handles}</td>
-        <td class="col-num col-session">${g.session}</td>
         <td class="col-status"><span class="status-pill${g.status !== 'Running' ? ' bad' : ''}"><i></i>${esc(g.status)}</span></td>
-        <td class="col-start">${fmtAge(g.start)}</td>
       </tr>`;
     }
 
@@ -429,19 +457,15 @@ function renderRows() {
       ? esc(p.name).replace(new RegExp(`(${q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'ig'), '<mark>$1</mark>')
       : esc(p.name);
     const flag = p.session === 0 ? '<span class="proc-flag">SYSTEM</span>' : '';
-    const subtitle = p.window ? esc(p.window) : (p.parentName ? `parent: ${esc(p.parentName)}` : '');
+    const rowTitle = p.window || (p.parentName ? `parent: ${p.parentName}` : p.name);
     return `<tr data-pid="${p.pid}" class="tier-${esc(tier)}${isSelected ? ' selected' : ''}${isFocused ? ' focused' : ''}${row.member ? ' member-row' : ''}">
       <td class="col-check"><input type="checkbox" data-check="${p.pid}" ${isSelected ? 'checked' : ''} /></td>
       <td class="col-risk">${riskCell(tier)}</td>
-      <td class="col-name"><span class="proc-cell"><span class="proc-name">${nameHtml}</span>${flag}<span class="proc-title">${subtitle}</span></span></td>
+      <td class="col-name"><span class="proc-cell"><span class="proc-name">${nameHtml}</span>${flag}<span class="row-spark" title="${esc(rowTitle)}">${sparkline(state.procHistory.get(p.pid) || [], { stroke: sparkColor(p.cpu) })}</span></span></td>
       <td class="col-num">${p.pid}</td>
       <td class="col-num ${p.cpu >= 25 ? 'cpu-hot' : p.cpu >= 5 ? 'cpu-warm' : ''}">${fmtPct(p.cpu)}</td>
       <td class="col-num ${p.ws >= 500 * MB ? 'mem-strong' : ''}">${fmtBytes(p.ws)}</td>
-      <td class="col-num">${p.threads}</td>
-      <td class="col-num">${p.handles}</td>
-      <td class="col-num col-session">${p.session}</td>
       <td class="col-status"><span class="status-pill${p.status !== 'Running' ? ' bad' : ''}"><i></i>${esc(p.status)}</span></td>
-      <td class="col-start" title="${esc(p.start || '')}">${fmtAge(p.start)}</td>
     </tr>`;
   }).join('');
 
@@ -976,6 +1000,19 @@ function pushHistory(snap) {
   const cutoff = Date.now() - keepSeconds * 1000;
   while (state.history.length && state.history[0].t < cutoff) state.history.shift();
   if (state.history.length > 4000) state.history.splice(0, state.history.length - 4000);
+
+  // Per-process CPU trace, drawn as the little line under each process name.
+  const seen = new Set();
+  for (const proc of snap.processes || []) {
+    seen.add(proc.pid);
+    const series = state.procHistory.get(proc.pid) || [];
+    series.push(Number(proc.cpu) || 0);
+    if (series.length > 32) series.shift();
+    state.procHistory.set(proc.pid, series);
+  }
+  for (const pid of [...state.procHistory.keys()]) {
+    if (!seen.has(pid)) state.procHistory.delete(pid);
+  }
 }
 
 function renderGraphs() {
@@ -1246,8 +1283,6 @@ function bindProcessesSettings(modal, body) {
 
   body.querySelector('#set-live').addEventListener('change', (event) => {
     state.live = event.target.checked;
-    const live = $('#opt-live');
-    if (live) live.checked = state.live;
     if (state.live) refresh(true);
   });
 }
@@ -1306,7 +1341,7 @@ function aboutSettingsHtml() {
     <div class="setting">
       <div class="setting-head"><label>Build</label></div>
       <dl class="kv settings-kv">
-        <dt>Version</dt><dd>beta 1.4</dd>
+        <dt>Version</dt><dd>beta 1.5</dd>
         <dt>Channel</dt><dd>pre-release</dd>
         <dt>Protection</dt><dd>5 tiers, re-checked on every end request</dd>
       </dl>
@@ -1490,7 +1525,6 @@ function wire() {
   document.querySelectorAll('.nav-item[data-page]').forEach((button) => {
     button.addEventListener('click', () => setPage(button.dataset.page));
   });
-  $('#nav-settings').addEventListener('click', () => openSettings());
   window.addEventListener('resize', () => {
     if (state.page === 'graphs') renderGraphs();
   });
@@ -1574,7 +1608,6 @@ function wire() {
     renderRows();
   });
 
-  $('#btn-refresh').addEventListener('click', () => refresh(true));
   // Clean dropdown ---------------------------------------------------------
   $('#btn-clean').addEventListener('click', (event) => {
     event.stopPropagation();
@@ -1623,13 +1656,6 @@ function wire() {
     $('#search').value = '';
     render();
   });
-
-  $('#opt-live').addEventListener('change', (event) => {
-    state.live = event.target.checked;
-    if (state.live) refresh(true);
-  });
-
-
 
   $('#btn-elevate').addEventListener('click', async () => {
     if (window.tm2?.relaunchAsAdmin) {

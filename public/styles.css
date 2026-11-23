@@ -928,3 +928,19 @@ input[type="range"]::-webkit-slider-thumb {
 }
 .seg button:hover { color: var(--text); }
 .seg button.active { background: rgba(56, 189, 248, .16); color: #d8f3ff; }
+
+/* ------------------------------------------------------------- sparklines -- */
+
+.row-spark {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px;
+  flex: 0 0 100%;
+  width: max-content;
+  max-width: 100%;
+}
+.proc-cell { flex-wrap: wrap; row-gap: 0; }
+.sparkline { display: block; overflow: visible; }
+.spark-base { stroke: rgba(120, 150, 175, .22); }
+td.col-name { min-width: 232px; }
