@@ -2,7 +2,7 @@
 
 A Windows Task Manager replacement that shows every process, sorts on anything, and tells you what breaks before you end something important.
 
-> **Status: beta 1.5 (pre-release).** Not confirmed stable. See [VERSIONS.md](VERSIONS.md).
+> **Status: beta 1.6 (pre-release).** Not confirmed stable. See [VERSIONS.md](VERSIONS.md).
 
 ## Why
 
@@ -30,7 +30,7 @@ The protection table is re-checked **on the server for every kill request**, so 
 
 **Folders, like Task Manager.** The list opens grouped: every app is a folder row with a chevron, an instance count and summed CPU and memory, and expanding it shows the processes inside. A folder checkbox selects the whole group at once. Turn the folder view off in Settings → Processes for a flat list. Every row carries a small live sparkline of that process's CPU on the line under its name; a folder shows the summed trace of its members.
 
-**Two pages, and settings with tabs.** The left column is just page navigation — **Processes** and **Graphs** — and Settings lives in the ⋯ menu. Everything that used to fill it — views, sort presets, folder grouping, showing system processes, refresh interval, live updates — moved into a Settings dialog with **Processes**, **Graphs** and **About** tabs. The Graphs page plots CPU, memory and disk from a sample taken on every refresh, over a window of 30 seconds to 10 minutes, drawn on canvas with no chart library; its own settings tab sets the history window and chart style.
+**Two pages, and settings with tabs.** The left column is just page navigation — **Processes** and **Graphs** — and Settings lives in the ⋯ menu. Everything that used to fill it — views, sort presets, folder grouping, showing system processes, refresh interval, live updates — moved into a Settings dialog with **Processes**, **Graphs** and **About** tabs. The Graphs page plots CPU and memory from a dedicated sampler that reads the OS every 10 ms — around 63 samples a second, which is what Windows' 15.6 ms timer allows, and the header reports the measured rate rather than the requested one. History is buffered for ten minutes, drawn at 30 fps on canvas with no chart library, and its settings tab sets the window and chart style. Disk busy time still comes from the process refresh, since that counter is only reachable through WMI.
 
 **Clean, with tickboxes.** The **Clean** button opens a dropdown with five categories, the way a memory cleaner does. Tick what you want and press Clean:
 

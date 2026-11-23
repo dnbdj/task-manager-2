@@ -3,6 +3,7 @@
 // no other page or process on the machine can drive the kill endpoints.
 
 import http from 'node:http';
+import os from 'node:os';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import crypto from 'node:crypto';
@@ -111,6 +112,64 @@ async function serveStatic(res, pathname) {
   }
 }
 
+// ---------------------------------------------------------- fast samples --
+// The process snapshot is expensive (WMI over hundreds of processes) and only
+// runs every few seconds. System CPU and memory come straight from the OS, so
+// they are sampled here at 100 Hz and handed to the graphs as a dense series.
+
+const FAST_INTERVAL_MS = Number(process.env.TM2_FAST_MS || 10);
+const FAST_RETENTION_MS = 10 * 60 * 1000;
+const FAST_MAX = 62000;
+// Windows only advances its CPU counters about every 15 ms, so comparing two
+// reads 10 ms apart would alternate between 0% and 100%. Each reading is
+// compared against one about 100 ms old instead, which is both smooth and
+// still far faster than the eye or the display can follow.
+const FAST_LAG_TICKS = 10;
+
+const fast = { samples: [], cursor: [], timer: null };
+
+function readCpuTimes() {
+  let idle = 0;
+  let total = 0;
+  for (const cpu of os.cpus()) {
+    const times = cpu.times;
+    idle += times.idle;
+    total += times.user + times.nice + times.sys + times.idle + times.irq;
+  }
+  return { idle, total };
+}
+
+function fastTick() {
+  const now = Date.now();
+  const reading = { t: now, ...readCpuTimes() };
+  fast.cursor.push(reading);
+  while (fast.cursor.length > FAST_LAG_TICKS + 2) fast.cursor.shift();
+
+  const base = fast.cursor[0];
+  const deltaTotal = reading.total - base.total;
+  const deltaIdle = reading.idle - base.idle;
+  const cpu = deltaTotal > 0 ? Math.min(100, Math.max(0, (1 - deltaIdle / deltaTotal) * 100)) : 0;
+
+  const totalMem = os.totalmem();
+  const used = totalMem - os.freemem();
+  const ram = totalMem > 0 ? (used / totalMem) * 100 : 0;
+
+  fast.samples.push({ t: now, cpu: Math.round(cpu * 10) / 10, ram: Math.round(ram * 10) / 10 });
+
+  const cutoff = now - FAST_RETENTION_MS;
+  while (fast.samples.length && (fast.samples[0].t < cutoff || fast.samples.length > FAST_MAX)) {
+    fast.samples.shift();
+  }
+}
+
+function startFastSampler() {
+  if (fast.timer) return;
+  fast.cursor = [{ t: Date.now(), ...readCpuTimes() }, { t: Date.now(), ...readCpuTimes() }];
+  fast.timer = setInterval(fastTick, FAST_INTERVAL_MS);
+}
+
+startFastSampler();
+
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://${req.headers.host || `${HOST}:${port}`}`);
   const pathname = decodeURIComponent(url.pathname);
@@ -134,6 +193,24 @@ const server = http.createServer(async (req, res) => {
 
     if (req.method === 'GET' && pathname === '/api/health') {
       return json(res, 200, { ok: true, windows: IS_WINDOWS, port, pid: process.pid, ...getStatus() });
+    }
+
+    if (req.method === 'GET' && pathname === '/api/samples') {
+      const since = Number(url.searchParams.get('since') || 0);
+      const limit = since > 0 ? since : Date.now() - FAST_RETENTION_MS;
+      const fresh = [];
+      for (let i = fast.samples.length - 1; i >= 0; i -= 1) {
+        if (fast.samples[i].t <= limit) break;
+        fresh.push(fast.samples[i]);
+      }
+      fresh.reverse();
+      return json(res, 200, {
+        ok: true,
+        now: Date.now(),
+        interval: FAST_INTERVAL_MS,
+        buffered: fast.samples.length,
+        samples: fresh,
+      });
     }
 
     if (req.method === 'GET' && pathname === '/api/snapshot') {
@@ -167,7 +244,7 @@ const server = http.createServer(async (req, res) => {
       res.setHeader('content-disposition', `attachment; filename="task-manager-2-report-${stamp}.json"`);
       return json(res, 200, {
         app: 'Task Manager 2',
-        version: '1.5.0-beta.1',
+        version: '1.6.0-beta.1',
         generatedAt: new Date().toISOString(),
         note: 'Complete process list. Nothing is filtered out of this report.',
         snapshot,
@@ -209,7 +286,7 @@ function listen(attempt = 0) {
     port = server.address().port;
     const url = `http://${HOST}:${port}`;
     console.log('');
-    console.log('  Task Manager 2  -  beta 1.5');
+    console.log('  Task Manager 2  -  beta 1.6');
     console.log(`  ${url}`);
     console.log(`  platform: ${process.platform}`);
     console.log('  Nothing is filtered. Every end request is re-checked server-side.');

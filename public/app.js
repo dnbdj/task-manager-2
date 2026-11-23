@@ -108,6 +108,10 @@ const state = {
   graphFill: true,
   graphGrid: true,
   procHistory: new Map(),
+  fast: [],
+  lastFastT: 0,
+  fastInterval: 10,
+  graphTimer: null,
 };
 
 const byPid = () => new Map((state.snap?.processes || []).map((p) => [p.pid, p]));
@@ -961,6 +965,12 @@ function setPage(page) {
   });
   $('#page-processes').classList.toggle('hidden', state.page !== 'processes');
   $('#page-graphs').classList.toggle('hidden', state.page !== 'graphs');
+  if (state.page === 'graphs') {
+    pollFast();
+    startGraphLoop();
+  } else {
+    stopGraphLoop();
+  }
   render();
 }
 
@@ -1015,18 +1025,30 @@ function pushHistory(snap) {
   }
 }
 
+function fastCadence(samples) {
+  const take = Math.min(samples.length, 240);
+  if (take < 8) return null;
+  const gaps = [];
+  for (let i = samples.length - take + 1; i < samples.length; i += 1) {
+    gaps.push(samples[i].t - samples[i - 1].t);
+  }
+  gaps.sort((a, b) => a - b);
+  return gaps[Math.floor(gaps.length / 2)] || null;
+}
+
 function renderGraphs() {
   const snap = state.snap;
   if (!snap) return;
-  const samples = state.history.length;
-  const span = samples > 1 ? Math.round((state.history[samples - 1].t - state.history[0].t) / 1000) : 0;
+  const fast = state.fast;
+  const latest = fast.length ? fast[fast.length - 1] : null;
 
-  $('#graphs-sub').textContent = samples < 2
-    ? 'Collecting samples — the lines appear after the second refresh.'
-    : `${samples} samples over ${span}s · showing the last ${state.graphWindow}s · one sample every ${Math.round(state.pollMs / 1000)}s`;
+  const median = fastCadence(fast);
+  $('#graphs-sub').textContent = fast.length < 2 || !median
+    ? `Sampling CPU and memory every ${(state.fastInterval || 10) / 1000}s…`
+    : `${Math.round(1000 / median)} samples per second (measured every ${median}ms) · ${fast.length} points buffered · showing the last ${state.graphWindow}s`;
 
-  const cpu = snap.load?.cpu;
-  const ram = snap.memory?.percent;
+  const cpu = latest ? latest.cpu : snap.load?.cpu;
+  const ram = latest ? latest.ram : snap.memory?.percent;
   const disk = snap.load?.disk;
   $('#g-cpu-now').textContent = fmtPct(cpu);
   $('#g-ram-now').textContent = fmtPct(ram);
@@ -1034,15 +1056,42 @@ function renderGraphs() {
   $('#g-both-now').textContent = `${fmtPct(cpu)} / ${fmtPct(ram)}`;
   $('#g-cpu-foot').textContent = `${snap.os?.cores ?? '?'} logical cores`;
   $('#g-ram-foot').textContent = `${fmtBytes(snap.memory?.used)} of ${fmtBytes(snap.memory?.total)}`;
-  $('#g-disk-foot').textContent = 'busy time, sampled by TM2';
+  $('#g-disk-foot').textContent = `busy time · every ${Math.round(state.pollMs / 1000)}s`;
 
-  drawChart($('#chart-cpu'), [{ key: 'cpu', color: '#38bdf8' }]);
-  drawChart($('#chart-ram'), [{ key: 'ram', color: '#4ade80' }]);
-  drawChart($('#chart-disk'), [{ key: 'disk', color: '#fbbf24' }]);
-  drawChart($('#chart-both'), [{ key: 'cpu', color: '#38bdf8' }, { key: 'ram', color: '#4ade80' }]);
+  drawChart($('#chart-cpu'), [{ key: 'cpu', color: '#38bdf8' }], fast);
+  drawChart($('#chart-ram'), [{ key: 'ram', color: '#4ade80' }], fast);
+  drawChart($('#chart-disk'), [{ key: 'disk', color: '#fbbf24' }], state.history);
+  drawChart($('#chart-both'), [{ key: 'cpu', color: '#38bdf8' }, { key: 'ram', color: '#4ade80' }], fast);
 }
 
-function drawChart(canvas, series) {
+function indexFrom(points, t) {
+  let lo = 0;
+  let hi = points.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (points[mid].t < t) lo = mid + 1; else hi = mid;
+  }
+  return lo;
+}
+
+// When there are more points than pixels, keep the highest value in each pixel
+// column. Spikes survive and the path stays a few thousand segments wide.
+function bucketMax(points, key, cols, start, windowMs) {
+  const peak = new Array(cols).fill(null);
+  for (const point of points) {
+    const col = Math.min(cols - 1, Math.max(0, Math.floor(((point.t - start) / windowMs) * (cols - 1))));
+    const value = point[key];
+    if (peak[col] == null || value > peak[col]) peak[col] = value;
+  }
+  const out = [];
+  for (let col = 0; col < cols; col += 1) {
+    if (peak[col] == null) continue;
+    out.push({ t: start + ((col + 0.5) / cols) * windowMs, [key]: peak[col] });
+  }
+  return out;
+}
+
+function drawChart(canvas, series, source) {
   if (!canvas) return;
   const dpr = window.devicePixelRatio || 1;
   const cssWidth = canvas.clientWidth || canvas.parentElement?.clientWidth || 320;
@@ -1068,28 +1117,33 @@ function drawChart(canvas, series) {
   }
 
   const now = Date.now();
-  const start = now - state.graphWindow * 1000;
-  const points = state.history.filter((h) => h.t >= start);
+  const windowMs = state.graphWindow * 1000;
+  const start = now - windowMs;
+  const raw = source.slice(indexFrom(source, start));
 
-  if (points.length < 2) {
+  if (raw.length < 2) {
     ctx.fillStyle = 'rgba(150, 170, 190, 0.55)';
     ctx.font = '11px ui-monospace, monospace';
     ctx.fillText('waiting for samples', 6, cssHeight / 2);
     return;
   }
 
-  const xOf = (t) => ((t - start) / (state.graphWindow * 1000)) * cssWidth;
+  const cols = Math.max(1, Math.round(cssWidth));
+  const xOf = (t) => ((t - start) / windowMs) * cssWidth;
   const yOf = (v) => cssHeight - 4 - (Math.max(0, Math.min(100, v)) / 100) * (cssHeight - 8);
 
   for (const s of series) {
+    const plotted = raw.length > cols * 3 ? bucketMax(raw, s.key, cols, start, windowMs) : raw;
+    if (plotted.length < 2) continue;
+
     ctx.beginPath();
-    points.forEach((point, index) => {
+    plotted.forEach((point, index) => {
       const x = xOf(point.t);
       const y = yOf(point[s.key]);
       if (index === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
     });
     ctx.strokeStyle = s.color;
-    ctx.lineWidth = 1.8;
+    ctx.lineWidth = 1.5;
     ctx.lineJoin = 'round';
     ctx.lineCap = 'round';
     ctx.stroke();
@@ -1098,13 +1152,56 @@ function drawChart(canvas, series) {
       const gradient = ctx.createLinearGradient(0, 0, 0, cssHeight);
       gradient.addColorStop(0, `${s.color}44`);
       gradient.addColorStop(1, `${s.color}00`);
-      ctx.lineTo(xOf(points[points.length - 1].t), cssHeight);
-      ctx.lineTo(xOf(points[0].t), cssHeight);
+      ctx.lineTo(xOf(plotted[plotted.length - 1].t), cssHeight);
+      ctx.lineTo(xOf(plotted[0].t), cssHeight);
       ctx.closePath();
       ctx.fillStyle = gradient;
       ctx.fill();
     }
   }
+}
+
+// ------------------------------------------------------------ fast polling --
+
+const FAST_TRIM_MS = 10 * 60 * 1000;
+let fastTimer = null;
+
+async function pollFast() {
+  try {
+    const since = state.lastFastT || (Date.now() - state.graphWindow * 1000);
+    const data = await api(`/api/samples?since=${since}`);
+    if (data.interval) state.fastInterval = data.interval;
+    const incoming = data.samples || [];
+    if (incoming.length) {
+      for (const sample of incoming) state.fast.push(sample);
+      state.lastFastT = incoming[incoming.length - 1].t;
+    } else if (data.now) {
+      state.lastFastT = Math.max(state.lastFastT, data.now - 2000);
+    }
+    const dropTo = indexFrom(state.fast, Date.now() - FAST_TRIM_MS);
+    if (dropTo > 0) state.fast.splice(0, dropTo);
+    if (state.fast.length > 62000) state.fast.splice(0, state.fast.length - 62000);
+  } catch { /* server restarting */ }
+}
+
+function startFastPolling() {
+  if (fastTimer) return;
+  fastTimer = setInterval(() => {
+    if (!document.hidden) pollFast();
+  }, 100);
+  pollFast();
+}
+
+function startGraphLoop() {
+  if (state.graphTimer) return;
+  state.graphTimer = setInterval(() => {
+    if (state.page === 'graphs' && !document.hidden) renderGraphs();
+  }, 33);
+}
+
+function stopGraphLoop() {
+  clearInterval(state.graphTimer);
+  state.graphTimer = null;
 }
 
 // ----------------------------------------------------------------- settings --
@@ -1341,7 +1438,7 @@ function aboutSettingsHtml() {
     <div class="setting">
       <div class="setting-head"><label>Build</label></div>
       <dl class="kv settings-kv">
-        <dt>Version</dt><dd>beta 1.5</dd>
+        <dt>Version</dt><dd>beta 1.6</dd>
         <dt>Channel</dt><dd>pre-release</dd>
         <dt>Protection</dt><dd>5 tiers, re-checked on every end request</dd>
       </dl>
@@ -1710,4 +1807,5 @@ try {
 paintIntervalLabel();
 schedule();
 refresh(true);
+startFastPolling();
 setInterval(() => { if (state.snap && !document.hidden) updateHeaderStats(); }, 15000);
